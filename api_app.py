@@ -3,6 +3,7 @@ import weaviate
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 from weaviate.classes.query import Rerank, QueryReference
+from weaviate.auth import AuthApiKey # <-- IMPORTANT: New import for Weaviate API Key authentication
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 import requests
@@ -13,37 +14,54 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # 1. Load environment variables
+# For local development, this loads variables from ./bot.env
+# On Render, it will automatically use the environment variables you set in the Render dashboard.
 load_dotenv(dotenv_path='./bot.env')
 
 # 2. Weaviate Configuration
-WEAVIATE_URL = "http://localhost:8080"
+# Read Weaviate URL and API Key from environment variables
+WEAVIATE_URL = os.getenv("WEAVIATE_URL") # <-- CHANGED: Reads from environment variable
+WEAVIATE_API_KEY = os.getenv("WEAVIATE_API_KEY") # <-- NEW: Reads Weaviate API Key from environment variable
 WEAVIATE_COLLECTION_NAME = "CollegeFAQ"
 
 # 3. DeepSeek API Configuration
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
 
+# --- Essential checks for all required environment variables ---
 if not DEEPSEEK_API_KEY:
-    logging.error("Error: DEEPSEEK_API_KEY not found in bot.env file. Please add it.")
+    logging.error("Error: DEEPSEEK_API_KEY not found in environment variables. Please set it in Render or your local .env file.")
     raise ValueError("DEEPSEEK_API_KEY not set.")
+
+if not WEAVIATE_URL:
+    logging.error("Error: WEAVIATE_URL not found in environment variables. Please set it in Render or your local .env file.")
+    raise ValueError("WEAVIATE_URL not set.")
+
+if not WEAVIATE_API_KEY:
+    logging.error("Error: WEAVIATE_API_KEY not found in environment variables. Please set it in Render or your local .env file.")
+    raise ValueError("WEAVIATE_API_KEY not set.")
+
 
 # 4. Initialize Weaviate Client
 # We'll initialize this once globally for the API
 try:
     client = weaviate.WeaviateClient(
-        connection_params=weaviate.ConnectionParams.from_url(WEAVIATE_URL, grpc_port=50051)
+        # Use the URL and API Key from environment variables for cloud connection
+        url=WEAVIATE_URL, # <-- CHANGED: Use 'url=' directly for the main endpoint
+        auth_client_secret=AuthApiKey(WEAVIATE_API_KEY), # <-- CHANGED: Use AuthApiKey for authentication
     )
-    client.connect()
+    client.connect() # Attempts to connect to the Weaviate cluster
     if client.is_live():
         logging.info("Successfully connected to Weaviate!")
     else:
         logging.error("Failed to connect to Weaviate: Weaviate instance is not live after connecting.")
-        raise ConnectionError("Weaviate not live.")
+        raise ConnectionError("Weaviate not live or reachable.")
 except Exception as e:
     logging.error(f"Failed to connect to Weaviate: {e}")
-    raise ConnectionError(f"Weaviate connection error: {e}")
+    raise ConnectionError(f"Weaviate connection error: {e}. Check WEAVIATE_URL and WEAVIATE_API_KEY.")
 
 # Get the collection object for easier interaction
+# This assumes the 'CollegeFAQ' collection already exists in your Weaviate Cloud cluster.
 college_faqs_collection = client.collections.get(WEAVIATE_COLLECTION_NAME)
 
 # 5. Initialize Sentence Transformer Model
@@ -122,10 +140,15 @@ def generate_llm_response(user_query: str, relevant_faq_text: str) -> str:
     }
 
     try:
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, data=json.dumps(payload))
+        response = requests.post(
+            DEEPSEEK_API_URL,
+            headers=headers,
+            data=json.dumps(payload),
+            timeout=10 # <-- ADDED: This is likely why you saw the yellow line (best practice)
+        )
         response.raise_for_status() # Raise an HTTPError for bad responses (4xx or 5xx)
         response_data = response.json()
-        
+
         if response_data and 'choices' in response_data and len(response_data['choices']) > 0:
             return response_data['choices'][0]['message']['content'].strip()
         else:
@@ -136,6 +159,9 @@ def generate_llm_response(user_query: str, relevant_faq_text: str) -> str:
         if e.response.status_code == 402: # Insufficient Balance
             raise HTTPException(status_code=503, detail="DeepSeek API: Insufficient Balance. Please top up your account.")
         raise HTTPException(status_code=500, detail=f"DeepSeek API Error: {e.response.status_code} - {e.response.text}")
+    except requests.exceptions.Timeout: # <-- NEW: Handle timeout specifically
+        logging.error(f"DeepSeek API request timed out after {10} seconds.")
+        raise HTTPException(status_code=504, detail="DeepSeek API did not respond in time.")
     except Exception as e:
         logging.error(f"Error generating LLM response: {e}")
         raise HTTPException(status_code=500, detail="Error generating AI response.")
@@ -148,19 +174,21 @@ async def chat_with_bot(request: ChatRequest):
     Endpoint for chatting with the College Chatbot.
     """
     user_query = request.query
-    
+
     # 1. Retrieve relevant FAQs from Weaviate
     relevant_faqs = get_relevant_faq(user_query, top_k=1) # Get top 1 most relevant FAQ
 
     if relevant_faqs:
         top_faq = relevant_faqs[0]
         context_text = f"Question: {top_faq['question']}\nAnswer: {top_faq['answer']}"
-        
+
         # 2. Generate LLM response using DeepSeek
         chatbot_response = generate_llm_response(user_query, context_text)
         return {"response": chatbot_response, "source_faq": top_faq}
     else:
         logging.info(f"No relevant FAQ found for query: '{user_query}'")
+        # You might consider having the LLM generate a generic response here
+        # or simply state no relevant info was found.
         return {"response": "I couldn't find a relevant FAQ for your question. Please try rephrasing or ask about general college topics.", "source_faq": None}
 
 
