@@ -20,8 +20,8 @@ load_dotenv(dotenv_path='./bot.env')
 
 # 2. Weaviate Configuration
 # Read Weaviate URL and API Key from environment variables
-WEAVIATE_URL = os.getenv("WEAVIATE_URL") # <-- CHANGED: Reads from environment variable
-WEAVIATE_API_KEY = os.getenv("WEAVIATE_API_KEY") # <-- NEW: Reads Weaviate API Key from environment variable
+WEAVIATE_URL = os.getenv("WEAVIATE_URL") # <-- Reads from environment variable
+WEAVIATE_API_KEY = os.getenv("WEAVIATE_API_KEY") # <-- Reads Weaviate API Key from environment variable
 WEAVIATE_COLLECTION_NAME = "CollegeFAQ"
 
 # 3. DeepSeek API Configuration
@@ -46,9 +46,10 @@ if not WEAVIATE_API_KEY:
 # We'll initialize this once globally for the API
 try:
     client = weaviate.WeaviateClient(
-        # Use the URL and API Key from environment variables for cloud connection
-        url=WEAVIATE_URL, # <-- CHANGED: Use 'url=' directly for the main endpoint
-        auth_client_secret=AuthApiKey(WEAVIATE_API_KEY), # <-- CHANGED: Use AuthApiKey for authentication
+        # *** THIS IS THE CRITICAL CHANGE FOR WEAVIATE V4.x ***
+        # Use '_url=' instead of 'url='
+        _url=WEAVIATE_URL, # <--- CHANGED THIS LINE!
+        auth_client_secret=AuthApiKey(WEAVIATE_API_KEY), # This part was already correct!
     )
     client.connect() # Attempts to connect to the Weaviate cluster
     if client.is_live():
