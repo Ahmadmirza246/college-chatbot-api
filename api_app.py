@@ -44,8 +44,8 @@ if not WEAVIATE_API_KEY:
 # 4. Initialize Weaviate Client
 try:
     client = weaviate.WeaviateClient(
-        # *** THIS IS THE CRITICAL CHANGE: Use '_url=' for Weaviate Client v4.x ***
-        _url=WEAVIATE_URL, # <--- CHANGED THIS LINE FROM 'url' TO '_url'
+        # Revert this back to 'url=' based on the *current* error from Render
+        url=WEAVIATE_URL, # <--- CHANGE THIS LINE BACK TO 'url'
         auth_client_secret=AuthApiKey(WEAVIATE_API_KEY),
     )
     client.connect()
