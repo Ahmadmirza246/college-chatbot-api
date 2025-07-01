@@ -14,6 +14,8 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # 1. Load environment variables
+# For local development, this loads variables from ./bot.env
+# On Render, it will automatically use the environment variables you set in the Render dashboard.
 load_dotenv(dotenv_path='./bot.env')
 
 # 2. Weaviate Configuration
@@ -42,8 +44,8 @@ if not WEAVIATE_API_KEY:
 # 4. Initialize Weaviate Client
 try:
     client = weaviate.WeaviateClient(
-        # *** THIS IS THE CRITICAL CHANGE BACK TO 'url' FOR WEAVIATE CLIENT ***
-        url=WEAVIATE_URL, # <--- CHANGED THIS LINE BACK TO 'url'
+        # *** THIS IS THE CRITICAL CHANGE: Use '_url=' for Weaviate Client v4.x ***
+        _url=WEAVIATE_URL, # <--- CHANGED THIS LINE FROM 'url' TO '_url'
         auth_client_secret=AuthApiKey(WEAVIATE_API_KEY),
     )
     client.connect()
